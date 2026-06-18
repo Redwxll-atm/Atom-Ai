@@ -1,0 +1,22 @@
+{
+  "name": "testia",
+  "version": "1.0.0",
+  "description": "Test IA",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha test/**/*.js"
+  },
+  "dependencies": {
+    "@heyputer/puter.js": "^2.5.3",
+    "@inquirer/prompts": "^8.5.2",
+    "figlet": "^1.11.0",
+    "marked": "^15.0.12",
+    "marked-terminal": "^7.3.0"
+  },
+  "devDependencies": {
+    "mocha": "^11.7.6"
+  }
+}
