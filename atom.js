@@ -357,6 +357,7 @@ const SLASH_COMMANDS = [
 ];
 
 // ─── INTERACTIVE PROMPT (FIXED & ROBUST) ─────────────────────────────────────
+// ─── INTERACTIVE PROMPT (FIXED & ROBUST) ─────────────────────────────────────
 function askPrompt() {
     const sessionStats = `${t.ok}${filesCreated}${t.reset} created   ${t.warn}${filesEdited}${t.reset} edited`;
     const left = `\n  ${t.subtle}${sessionStats}${t.reset}`;
@@ -370,9 +371,10 @@ function askPrompt() {
     let menuIndex = 0;
     let menuItems = [];
     let lastMenuLines = 0;
+    let lastVisibleLen = 0;
 
     function clearPromptAndMenu() {
-        process.stdout.write("\x1b[2K\r"); // Efface la ligne de prompt
+        // 1. Effacer le menu s'il existe
         if (lastMenuLines > 0) {
             for (let i = 0; i < lastMenuLines; i++) {
                 process.stdout.write("\x1b[1B\x1b[2K"); // Descend et efface
@@ -382,6 +384,13 @@ function askPrompt() {
             }
             lastMenuLines = 0;
         }
+
+        // 2. Effacer le prompt (gère le retour à la ligne automatique)
+        const linesToClear = Math.max(0, Math.floor((lastVisibleLen - 1) / cols()));
+        process.stdout.write("\x1b[2K\r"); // Efface la ligne actuelle
+        for (let i = 0; i < linesToClear; i++) {
+            process.stdout.write("\x1b[1A\x1b[2K\r"); // Monte d'une ligne et efface
+        }
     }
 
     function drawPrompt() {
@@ -389,12 +398,19 @@ function askPrompt() {
 
         const prefix = `  ${t.violet}❯${t.reset} `;
         const visiblePrefixLen = 4;
+        let baseText = "";
+        let currentVisibleLen = 0;
 
         if (input.length === 0) {
-            process.stdout.write(`${prefix}${t.muted}Insert your instruction... (type / for commands)${t.reset}`);
+            baseText = `${t.muted}Insert your instruction... (type / for commands)${t.reset}`;
+            currentVisibleLen = visiblePrefixLen + "Insert your instruction... (type / for commands)".length;
         } else {
-            process.stdout.write(`${prefix}${t.accent}${input}${t.reset}`);
+            baseText = `${t.accent}${input}${t.reset}`;
+            currentVisibleLen = visiblePrefixLen + input.length;
         }
+
+        process.stdout.write(prefix + baseText);
+        lastVisibleLen = currentVisibleLen;
 
         let currentMenuLines = 0;
         if (menuActive) {
@@ -406,7 +422,7 @@ function askPrompt() {
                 const item = menuItems[i];
                 const isSelected = i === menuIndex;
                 const namePad = ("/" + item.name).padEnd(12);
-                process.stdout.write(`\n`);
+                process.stdout.write(`\r\n`); // S'assure d'aller à la ligne proprement
                 if (isSelected) {
                     process.stdout.write(`  ${t.violet}${t.bold}❯ ${namePad}${t.reset} ${t.accent}${item.desc}${t.reset}`);
                 } else {
@@ -416,13 +432,13 @@ function askPrompt() {
             }
         }
 
-        for (let i = 0; i < currentMenuLines; i++) {
-            process.stdout.write("\x1b[1A");
-        }
-
+        // Repositionner le curseur si le menu est ouvert
         if (currentMenuLines > 0) {
-            const col = visiblePrefixLen + input.length + 1;
-            process.stdout.write(`\x1b[${col}G`);
+            for (let i = 0; i < currentMenuLines; i++) {
+                process.stdout.write("\x1b[1A"); // Remonte à la ligne du prompt
+            }
+            const cursorCol = (currentVisibleLen % cols()) || cols();
+            process.stdout.write(`\x1b[${cursorCol}G`); // Définit la colonne exacte
         }
 
         lastMenuLines = currentMenuLines;
@@ -655,7 +671,8 @@ async function handleInput(raw) {
             console.log(`  ${t.warn}Note: The model returned malformed JSON.${t.reset}\n`);
             conversationHistory.push({ role: "user", content: userPrompt });
             conversationHistory.push({ role: "assistant", content });
-            askPrompt();
+            // FIX: Removed askPrompt() here to prevent multiple listeners from being registered.
+            // The finally block below will handle calling askPrompt().
             return;
         }
 
@@ -798,6 +815,7 @@ async function handleInput(raw) {
     } catch (err) {
         stopSpinner(spinner, `  ${t.err}✗ error  ${t.muted}${err.message || JSON.stringify(err)}${t.reset}`);
     } finally {
+        // This will safely handle restoring the prompt after everything (including early returns)
         askPrompt();
     }
 }
