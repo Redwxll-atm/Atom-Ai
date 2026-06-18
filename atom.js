@@ -44,16 +44,19 @@ const MAX_FILE_SIZE = 15_000;
 const MAX_FILES = 15;
 const MAX_CONTEXT_CHARS = 20_000;
 
-let MODEL = "z-ai/glm-5-turbo";
-let MODEL_LABEL = "glm-5-turbo";
+let MODEL = "z-ai/glm-5.2";
+let MODEL_LABEL = "glm-5.2";
 const VERSION = _require("./package.json").version;
 
 const MODELS = [
+    // Modèle interne Puter (Gratuit)
     { id: "z-ai/glm-5-turbo", label: "glm-5-turbo" },
-    { id: "openai/gpt-4o", label: "gpt-4o" },
-    { id: "openai/gpt-4-turbo", label: "gpt-4-turbo" },
-    { id: "meta-llama/llama-3-70b-instruct", label: "llama-3-70b" },
-    { id: "mistral-large", label: "mistral-large" }
+
+    // Modèles OpenAI (Très stables via Puter)
+    { id: "gpt-4o", label: "gpt-4o" },
+    { id: "gpt-4o-mini", label: "gpt-4o-mini" },
+    { id: "gpt-4-turbo", label: "gpt-4-turbo" },
+    { id: "gpt-3.5-turbo", label: "gpt-3.5-turbo" }
 ];
 
 // ─── CONFIG MANAGEMENT ───────────────────────────────────────────────────────
