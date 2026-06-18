@@ -1,5 +1,7 @@
+#!/usr/bin/env node
 import { init } from "@heyputer/puter.js/src/init.cjs";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
@@ -47,9 +49,74 @@ const MODELS = [
     { id: "mistral-large", label: "mistral-large" }
 ];
 
-const puter = init(
-    ""
-);
+// ─── config management ───────────────────────────────────────────────────────
+
+const CONFIG_DIR = path.join(os.homedir(), ".atom-cli");
+const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
+
+function getConfig() {
+    try {
+        return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
+    } catch {
+        return {};
+    }
+}
+
+function setConfig(data) {
+    if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    const current = getConfig();
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify({ ...current, ...data }, null, 2));
+}
+
+function promptInput(question) {
+    return new Promise((resolve) => {
+        process.stdout.write(question);
+        process.stdin.setEncoding("utf8");
+        process.stdin.once("data", (data) => {
+            resolve(data.trim());
+        });
+    });
+}
+
+// ─── CLI commands (login / logout) ───────────────────────────────────────────
+
+const args = process.argv.slice(2);
+
+if (args[0] === "login") {
+    console.log();
+    console.log(`  ${t.violet}${t.bold}ATOM${t.reset}  ${t.muted}login${t.reset}`);
+    console.log();
+    console.log(`  ${t.muted}Go to ${t.accent}https://puter.com${t.muted} and generate an API token.${t.reset}`);
+    console.log();
+    const key = await promptInput(`  ${t.violetDim}Paste your API key: ${t.reset}`);
+    if (!key) {
+        console.log(`\n  ${t.err}No key provided. Aborting.${t.reset}\n`);
+        process.exit(1);
+    }
+    setConfig({ apiKey: key });
+    console.log(`\n  ${t.ok}API key saved to ${t.dim}${CONFIG_FILE}${t.reset}`);
+    console.log(`  ${t.muted}You can now run ${t.accent}atom${t.muted} to start coding!${t.reset}\n`);
+    process.exit(0);
+}
+
+if (args[0] === "logout") {
+    try { fs.unlinkSync(CONFIG_FILE); } catch {}
+    console.log(`\n  ${t.ok}Logged out. API key removed.${t.reset}\n`);
+    process.exit(0);
+}
+
+// ─── puter init ──────────────────────────────────────────────────────────────
+
+const config = getConfig();
+if (!config.apiKey) {
+    console.log();
+    console.log(`  ${t.err}No API key found.${t.reset}`);
+    console.log(`  ${t.muted}Run ${t.accent}atom login${t.muted} to authenticate.${t.reset}`);
+    console.log();
+    process.exit(1);
+}
+
+const puter = init(config.apiKey);
 
 let conversationHistory = [];
 let promptCount = 0;
@@ -382,6 +449,15 @@ async function handleInput(raw) {
         return;
     }
 
+    if (userPrompt.toLowerCase() === "/key") {
+        const masked = config.apiKey ? config.apiKey.slice(0, 10) + "..." + config.apiKey.slice(-6) : "none";
+        console.log(`\n  ${t.violet}API Key${t.reset}`);
+        console.log(`  ${t.muted}current: ${masked}${t.reset}`);
+        console.log(`  ${t.dim}To change your key, run ${t.accent}atom login${t.dim} in your terminal.${t.reset}\n`);
+        askPrompt();
+        return;
+    }
+
     promptCount++;
 
     if (conversationHistory.length > 6) conversationHistory = conversationHistory.slice(-6);
@@ -683,6 +759,8 @@ async function start() {
 
     console.log();
     console.log(rule("─"));
+    console.log();
+    console.log(`${t.muted}commands  ${t.violetDim}/model${t.muted} switch model  ${t.violetDim}/key${t.muted} view api key  ${t.violetDim}exit${t.muted} quit${t.reset}`);
     console.log();
     console.log(`${t.violetDim}ready${t.reset}`);
 

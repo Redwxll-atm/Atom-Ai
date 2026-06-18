@@ -1,11 +1,14 @@
 {
-  "name": "testia",
-  "version": "1.0.0",
-  "description": "Test IA",
+  "name": "atom-cli",
+  "version": "0.2.0",
+  "description": "ATOM - Autonomous Coding Agent",
   "license": "ISC",
-  "author": "",
+  "author": "Redwxll",
   "type": "module",
   "main": "index.js",
+  "bin": {
+    "atom": "./index.js"
+  },
   "scripts": {
     "test": "mocha test/**/*.js"
   },
