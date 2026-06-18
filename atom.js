@@ -6,6 +6,8 @@ import path from "path";
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import { exec } from "child_process";
+import { createRequire } from "module";
+const _require = createRequire(import.meta.url);
 
 marked.use(markedTerminal());
 
@@ -39,7 +41,7 @@ const IGNORE_EXTS = [".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", "
 const MAX_FILE_SIZE = 15_000;
 let MODEL = "z-ai/glm-5-turbo";
 let MODEL_LABEL = "glm-5-turbo";
-const VERSION = "0.2.0";
+const VERSION = _require("./package.json").version;
 
 const MODELS = [
     { id: "z-ai/glm-5-turbo", label: "glm-5-turbo" },
@@ -107,16 +109,16 @@ if (args[0] === "logout") {
 
 // ─── puter init ──────────────────────────────────────────────────────────────
 
-const config = getConfig();
+let config = getConfig();
 if (!config.apiKey) {
     console.log();
     console.log(`  ${t.err}No API key found.${t.reset}`);
-    console.log(`  ${t.muted}Run ${t.accent}atom login${t.muted} to authenticate.${t.reset}`);
+    console.log(`  ${t.muted}Run ${t.accent}atom login${t.muted} or type ${t.accent}/login${t.muted} after starting atom.${t.reset}`);
     console.log();
     process.exit(1);
 }
 
-const puter = init(config.apiKey);
+let puter = init(config.apiKey);
 
 let conversationHistory = [];
 let promptCount = 0;
@@ -178,17 +180,21 @@ function elapsed() {
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function scanDir(dirPath, prefix = "") {
+const MAX_FILES = 50;
+const MAX_CONTEXT_CHARS = 60_000;
+
+function scanDir(dirPath, prefix = "", _count = { n: 0 }) {
     let tree = "";
     let files = [];
     try {
         const entries = fs.readdirSync(dirPath, { withFileTypes: true });
         for (const entry of entries) {
+            if (_count.n >= MAX_FILES) break;
             if (IGNORE_DIRS.includes(entry.name)) continue;
             const fullPath = path.join(dirPath, entry.name);
             if (entry.isDirectory()) {
                 tree += `${prefix}${entry.name}/\n`;
-                const sub = scanDir(fullPath, prefix + "  ");
+                const sub = scanDir(fullPath, prefix + "  ", _count);
                 tree += sub.tree;
                 files.push(...sub.files);
             } else {
@@ -201,6 +207,7 @@ function scanDir(dirPath, prefix = "") {
                         ? fs.readFileSync(fullPath, "utf-8")
                         : "[file too large — truncated]";
                     files.push({ path: fullPath.replace(/\\/g, "/"), content });
+                    _count.n++;
                 } catch { /* skip unreadable files */ }
             }
         }
@@ -240,9 +247,16 @@ function buildContext() {
 
     let ctx = `\n--- PROJECT CONTEXT (${cwd}) ---\n`;
     ctx += `File tree:\n${tree}\n`;
+    let totalChars = ctx.length;
     for (const f of files) {
         const rel = path.relative(cwd, f.path).replace(/\\/g, "/");
-        ctx += `--- ${rel} ---\n${f.content}\n--- end ${rel} ---\n\n`;
+        const block = `--- ${rel} ---\n${f.content}\n--- end ${rel} ---\n\n`;
+        if (totalChars + block.length > MAX_CONTEXT_CHARS) {
+            ctx += `[context limit reached — ${files.length} files total, showing partial]\n`;
+            break;
+        }
+        ctx += block;
+        totalChars += block.length;
     }
     ctx += `--- END PROJECT CONTEXT ---\n`;
 
@@ -334,6 +348,16 @@ function printStatus(icon, color, msg) {
     console.log(`  ${color}${icon}${t.reset}  ${msg}`);
 }
 
+// ─── slash commands definition ────────────────────────────────────────────────
+const SLASH_COMMANDS = [
+    { name: "help", desc: "Show all available commands" },
+    { name: "model", desc: "List or switch AI model" },
+    { name: "key", desc: "View your current API key" },
+    { name: "login", desc: "Set a new API key" },
+    { name: "logout", desc: "Remove your API key" },
+    { name: "quit", desc: "Exit the CLI" },
+];
+
 function askPrompt() {
     console.log();
     console.log(rule());
@@ -349,6 +373,10 @@ function askPrompt() {
     console.log();
 
     let input = "";
+    let menuActive = false;
+    let menuIndex = 0;
+    let menuItems = [];
+    let menuLineCount = 0;
 
     const BG = "\x1b[48;5;238m";
     const FG = "\x1b[38;5;255m";
@@ -370,13 +398,66 @@ function askPrompt() {
         return emptyRow + "\n" + textRow + "\n" + emptyRow + "\n";
     }
 
-    function renderBox() {
-        process.stdout.write("\x1b[3A\r" + drawBox(input || "", input.length === 0));
+    function getFilteredCommands() {
+        const query = input.slice(1).toLowerCase(); // strip the leading /
+        return SLASH_COMMANDS.filter(c => c.name.startsWith(query));
     }
 
-    function onResize() {
-        renderBox();
+    function renderMenu() {
+        const currentCols = cols();
+        menuItems = getFilteredCommands();
+
+        // clamp index
+        if (menuIndex >= menuItems.length) menuIndex = 0;
+
+        // clear previous menu lines
+        if (menuLineCount > 0) {
+            for (let i = 0; i < menuLineCount; i++) {
+                process.stdout.write("\x1b[1A\x1b[2K");
+            }
+        }
+
+        if (menuItems.length === 0) {
+            menuLineCount = 0;
+            return;
+        }
+
+        const nameWidth = Math.max(...menuItems.map(c => c.name.length)) + 2;
+        let out = "";
+        for (let i = 0; i < menuItems.length; i++) {
+            const item = menuItems[i];
+            const isSelected = i === menuIndex;
+            const namePad = ("/" + item.name).padEnd(nameWidth);
+            if (isSelected) {
+                out += `\x1b[48;5;236m${t.violet}${t.bold} ${namePad}${t.reset}\x1b[48;5;236m  ${t.accent}${item.desc}${t.reset}`;
+            } else {
+                out += `  ${t.violetDim}${namePad}${t.reset}  ${t.muted}${item.desc}${t.reset}`;
+            }
+            out += " ".repeat(Math.max(0, currentCols - namePad.length - item.desc.length - 4)) + "\n";
+        }
+
+        // count indicator
+        out += `${t.subtle}(${menuIndex + 1}/${menuItems.length})${t.reset}\n`;
+        menuLineCount = menuItems.length + 1;
+
+        process.stdout.write(out);
     }
+
+    function clearMenu() {
+        if (menuLineCount > 0) {
+            for (let i = 0; i < menuLineCount; i++) {
+                process.stdout.write("\x1b[1A\x1b[2K");
+            }
+            menuLineCount = 0;
+        }
+    }
+
+    function renderBox() {
+        process.stdout.write("\x1b[3A\r" + drawBox(input || "", input.length === 0));
+        if (menuActive) renderMenu();
+    }
+
+    function onResize() { renderBox(); }
     process.stdout.on("resize", onResize);
 
     process.stdout.write(drawBox("insert your instruction...", true));
@@ -386,25 +467,128 @@ function askPrompt() {
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
 
+    function cleanup() {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener("data", onData);
+        process.stdout.removeListener("resize", onResize);
+        process.stdout.write("\x1b[?25h");
+    }
+
+    function submitInput(value) {
+        clearMenu();
+        process.stdout.write("\x1b[3A\x1b[2K\x1b[1B\x1b[2K\x1b[1B\x1b[2K\x1b[1A\r");
+        handleInput(value);
+    }
+
     function onData(key) {
+        // Ctrl+C
         if (key === "\u0003") { process.stdout.write("\x1b[?25h"); process.exit(); }
-        if (key === "\r" || key === "\n") {
-            if (!input.trim()) return;
-            process.stdin.setRawMode(false);
-            process.stdin.pause();
-            process.stdin.removeListener("data", onData);
-            process.stdout.removeListener("resize", onResize);
-            process.stdout.write("\x1b[?25h");
-            process.stdout.write("\x1b[3A\x1b[2K\x1b[1B\x1b[2K\x1b[1B\x1b[2K\x1b[1A\r");
-            handleInput(input);
+
+        // Arrow up
+        if (key === "\x1b[A") {
+            if (menuActive && menuItems.length > 0) {
+                menuIndex = (menuIndex - 1 + menuItems.length) % menuItems.length;
+                renderMenu();
+            }
             return;
         }
+
+        // Arrow down
+        if (key === "\x1b[B") {
+            if (menuActive && menuItems.length > 0) {
+                menuIndex = (menuIndex + 1) % menuItems.length;
+                renderMenu();
+            }
+            return;
+        }
+
+        // Tab — autocomplete selected menu item
+        if (key === "\t") {
+            if (menuActive && menuItems.length > 0) {
+                input = "/" + menuItems[menuIndex].name;
+                process.stdout.write("\x1b[3A\r" + drawBox(input, false));
+                renderMenu();
+            }
+            return;
+        }
+
+        // Enter
+        if (key === "\r" || key === "\n") {
+            if (menuActive && menuItems.length > 0) {
+                // select highlighted command
+                const selected = "/" + menuItems[menuIndex].name;
+                cleanup();
+                clearMenu();
+                process.stdout.write("\x1b[3A\x1b[2K\x1b[1B\x1b[2K\x1b[1B\x1b[2K\x1b[1A\r");
+                handleInput(selected);
+                return;
+            }
+            if (!input.trim()) return;
+            cleanup();
+            submitInput(input);
+            return;
+        }
+
+        // Escape — close menu
+        if (key === "\x1b") {
+            if (menuActive) {
+                menuActive = false;
+                clearMenu();
+                process.stdout.write("\x1b[3A\r" + drawBox(input, false));
+            }
+            return;
+        }
+
+        // Backspace
         if (key === "\x7f" || key === "\b") {
             input = input.slice(0, -1);
-        } else if (key.charCodeAt(0) >= 32) {
-            input += key;
+            if (input === "" || input === "/") {
+                if (input === "") {
+                    menuActive = false;
+                    clearMenu();
+                }
+            }
+            if (input.startsWith("/")) {
+                menuActive = true;
+                menuIndex = 0;
+                process.stdout.write("\x1b[3A\r" + drawBox(input, false));
+                renderMenu();
+            } else {
+                menuActive = false;
+                clearMenu();
+                process.stdout.write("\x1b[3A\r" + drawBox(input || "", input.length === 0));
+            }
+            return;
         }
-        renderBox();
+
+        // Printable chars
+        if (key.charCodeAt(0) >= 32) {
+            input += key;
+
+            // open menu when "/" is first char
+            if (input === "/") {
+                menuActive = true;
+                menuIndex = 0;
+                process.stdout.write("\x1b[3A\r" + drawBox(input, false));
+                renderMenu();
+                return;
+            }
+
+            // filter menu as user types
+            if (input.startsWith("/")) {
+                menuActive = true;
+                menuIndex = 0;
+                process.stdout.write("\x1b[3A\r" + drawBox(input, false));
+                renderMenu();
+                return;
+            }
+
+            // normal input
+            menuActive = false;
+            clearMenu();
+            process.stdout.write("\x1b[3A\r" + drawBox(input, false));
+        }
     }
 
     process.stdin.on("data", onData);
@@ -423,6 +607,24 @@ async function handleInput(raw) {
         return;
     }
 
+    // ─── /help ───────────────────────────────────────────────────────────────
+    if (userPrompt.toLowerCase() === "/help") {
+        console.log();
+        console.log(`  ${t.violet}${t.bold}Available commands${t.reset}`);
+        console.log(`  ${t.violetDim}${"─".repeat(30)}${t.reset}`);
+        console.log(`  ${t.violetDim}/help${t.reset}          ${t.muted}show this help message${t.reset}`);
+        console.log(`  ${t.violetDim}/model${t.reset}         ${t.muted}list available AI models${t.reset}`);
+        console.log(`  ${t.violetDim}/model <name>${t.reset}  ${t.muted}switch to a specific model${t.reset}`);
+        console.log(`  ${t.violetDim}/key${t.reset}           ${t.muted}view your current API key${t.reset}`);
+        console.log(`  ${t.violetDim}/login${t.reset}         ${t.muted}set a new API key${t.reset}`);
+        console.log(`  ${t.violetDim}/logout${t.reset}        ${t.muted}remove your API key${t.reset}`);
+        console.log(`  ${t.violetDim}exit / quit${t.reset}    ${t.muted}end the session${t.reset}`);
+        console.log();
+        askPrompt();
+        return;
+    }
+
+    // ─── /model ──────────────────────────────────────────────────────────────
     if (userPrompt.toLowerCase().startsWith("/model")) {
         const parts = userPrompt.split(" ");
         if (parts.length === 1) {
@@ -449,11 +651,48 @@ async function handleInput(raw) {
         return;
     }
 
+    // ─── /key ────────────────────────────────────────────────────────────────
     if (userPrompt.toLowerCase() === "/key") {
         const masked = config.apiKey ? config.apiKey.slice(0, 10) + "..." + config.apiKey.slice(-6) : "none";
         console.log(`\n  ${t.violet}API Key${t.reset}`);
         console.log(`  ${t.muted}current: ${masked}${t.reset}`);
-        console.log(`  ${t.dim}To change your key, run ${t.accent}atom login${t.dim} in your terminal.${t.reset}\n`);
+        console.log(`  ${t.dim}To change your key, type ${t.accent}/login${t.dim}.${t.reset}\n`);
+        askPrompt();
+        return;
+    }
+
+    // ─── /logout ─────────────────────────────────────────────────────────────
+    if (userPrompt.toLowerCase() === "/logout") {
+        try { fs.unlinkSync(CONFIG_FILE); } catch { }
+        config.apiKey = null;
+        console.log(`\n  ${t.ok}Logged out. API key removed.${t.reset}`);
+        console.log(`  ${t.muted}Type ${t.accent}/login${t.muted} to authenticate again.${t.reset}\n`);
+        askPrompt();
+        return;
+    }
+
+    // ─── /login ──────────────────────────────────────────────────────────────
+    if (userPrompt.toLowerCase() === "/login") {
+        console.log();
+        console.log(`  ${t.violet}${t.bold}Login${t.reset}`);
+        console.log(`  ${t.muted}Go to ${t.accent}https://puter.com${t.muted} and generate an API token.${t.reset}`);
+        console.log();
+
+        process.stdin.setRawMode(false);
+        process.stdin.resume();
+        const key = await promptInput(`  ${t.violetDim}Paste your API key: ${t.reset}`);
+
+        if (!key) {
+            console.log(`\n  ${t.err}No key provided.${t.reset}\n`);
+            askPrompt();
+            return;
+        }
+
+        setConfig({ apiKey: key });
+        config.apiKey = key;
+        puter = init(key); // reinitialize puter with new key
+        console.log(`\n  ${t.ok}API key saved and applied!${t.reset}`);
+        console.log(`  ${t.muted}You can now send prompts.${t.reset}\n`);
         askPrompt();
         return;
     }
@@ -718,6 +957,18 @@ function getDate() {
 }
 
 
+
+async function checkForUpdate() {
+    try {
+        const res = await fetch(`https://registry.npmjs.org/cli-atom/latest`, { signal: AbortSignal.timeout(3000) });
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.version || null;
+    } catch {
+        return null;
+    }
+}
+
 async function start() {
     console.clear();
 
@@ -728,6 +979,10 @@ async function start() {
     const node = getNodeVersion();
     const now = getNow();
     const date = getDate();
+
+    // check for update in background
+    const latestVersion = await checkForUpdate();
+    const hasUpdate = latestVersion && latestVersion !== VERSION;
 
     console.log();
     console.log(rule("─"));
@@ -760,8 +1015,13 @@ async function start() {
     console.log();
     console.log(rule("─"));
     console.log();
-    console.log(`${t.muted}commands  ${t.violetDim}/model${t.muted} switch model  ${t.violetDim}/key${t.muted} view api key  ${t.violetDim}exit${t.muted} quit${t.reset}`);
-    console.log();
+
+    if (hasUpdate) {
+        console.log(`  ${t.warn}update available${t.reset}  ${t.muted}v${VERSION} → ${t.accent}v${latestVersion}${t.reset}`);
+        console.log(`  ${t.dim}run ${t.accent}npm install -g cli-atom${t.dim} to update${t.reset}`);
+        console.log();
+    }
+
     console.log(`${t.violetDim}ready${t.reset}`);
 
     askPrompt();

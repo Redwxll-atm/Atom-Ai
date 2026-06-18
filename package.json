@@ -1,13 +1,13 @@
 {
-  "name": "@atomcli/cli",
-  "version": "0.2.0",
+  "name": "cli-atom",
+  "version": "0.2.7",
   "description": "ATOM - Coding Agent",
   "license": "ISC",
   "author": "Redwxll",
   "type": "module",
-  "main": "index.js",
+  "main": "atom.js",
   "bin": {
-    "atom": "./index.js"
+    "atom": "atom.js"
   },
   "scripts": {
     "test": "mocha test/**/*.js"
