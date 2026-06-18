@@ -100,7 +100,7 @@ if (args[0] === "login") {
 }
 
 if (args[0] === "logout") {
-    try { fs.unlinkSync(CONFIG_FILE); } catch {}
+    try { fs.unlinkSync(CONFIG_FILE); } catch { }
     console.log(`\n  ${t.ok}Logged out. API key removed.${t.reset}\n`);
     process.exit(0);
 }
@@ -733,10 +733,10 @@ async function start() {
     console.log(rule("─"));
     console.log();
 
-    const titleLeft = `${t.violet}${t.bold}ATOM${t.reset}  ${t.muted}autonomous coding agent${t.reset}`;
+    const titleLeft = `${t.violet}${t.bold}ATOM${t.reset}  ${t.muted}coding agent${t.reset}`;
     const titleRight = `${t.violetDim}v${VERSION}${t.reset}`;
     const titleRightVis = `v${VERSION}`;
-    const titleGap = w - "ATOM  autonomous coding agent".length - titleRightVis.length;
+    const titleGap = w - "ATOM  coding agent".length - titleRightVis.length;
     console.log(titleLeft + " ".repeat(Math.max(0, titleGap)) + titleRight);
 
     console.log();

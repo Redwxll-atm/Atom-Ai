@@ -1,7 +1,7 @@
 {
-  "name": "atom-cli",
+  "name": "@atomcli/cli",
   "version": "0.2.0",
-  "description": "ATOM - Autonomous Coding Agent",
+  "description": "ATOM - Coding Agent",
   "license": "ISC",
   "author": "Redwxll",
   "type": "module",
