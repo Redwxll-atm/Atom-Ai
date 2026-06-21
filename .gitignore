@@ -1,7 +1,9 @@
 node_modules/
 .env
-node_modules/
-.env
 .DS_Store
-discord/
-discord-bot/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+bot.py
